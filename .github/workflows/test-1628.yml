@@ -1,0 +1,206 @@
+name: setup-node v7 vs PR 41
+
+on:
+  push:
+    branches:
+      - test-686
+  workflow_dispatch:
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Create fixtures
+        run: |
+          mkdir -p fx
+          echo '{"volta":{"extends":"./self.json"}}' > fx/self.json
+          echo '{"volta":{"extends":"./b.json"}}'    > fx/a.json
+          echo '{"volta":{"extends":"./a.json"}}'    > fx/b.json
+          echo '{"volta":{"extends":"./nope.json"}}' > fx/dangling.json
+          echo '{"volta":{"extends":"./base.json"}}' > fx/chain.json
+          echo '{"volta":{"node":"20.11.0"}}'        > fx/base.json
+          echo '{"volta":{"node":"18.20.4"}}'        > fx/volta.json
+          echo '{"engines":{"node":"20.11.0"}}'      > fx/engines.json
+          echo "20.11.0"                             > fx/.nvmrc
+          echo "18.20.4"                             > fx/.node-version
+          printf "nodejs 20.11.0\n"                  > fx/.tool-versions
+          printf '[tools]\nnode = "20.11.0"\n'       > fx/mise.toml
+
+      # 1 self cycle - v7 - expect fail: RangeError Maximum call stack size exceeded
+      - name: 1 self cycle v7
+        id: c1v7
+        continue-on-error: true
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: fx/self.json
+
+      # 1 self cycle - PR - expect fail: Detected cyclic volta.extends chain
+      - name: 1 self cycle PR
+        id: c1pr
+        continue-on-error: true
+        uses: v-gowridurgad/setup-node@fix-1628
+        with:
+          node-version-file: fx/self.json
+
+      # 2 mutual cycle - v7 - expect fail: RangeError Maximum call stack size exceeded
+      - name: 2 mutual cycle v7
+        id: c2v7
+        continue-on-error: true
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: fx/a.json
+
+      # 2 mutual cycle - PR - expect fail: Detected cyclic volta.extends chain a.json -> b.json -> a.json
+      - name: 2 mutual cycle PR
+        id: c2pr
+        continue-on-error: true
+        uses: v-gowridurgad/setup-node@fix-1628
+        with:
+          node-version-file: fx/a.json
+
+      # 3 dangling extends - v7 - expect fail, message does not name nope.json
+      - name: 3 dangling extends v7
+        id: c3v7
+        continue-on-error: true
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: fx/dangling.json
+
+      # 3 dangling extends - PR - expect fail: The volta.extends target at .../nope.json does not exist (new behavior)
+      - name: 3 dangling extends PR
+        id: c3pr
+        continue-on-error: true
+        uses: v-gowridurgad/setup-node@fix-1628
+        with:
+          node-version-file: fx/dangling.json
+
+      # 4 valid volta chain - v7 - expect success
+      - name: 4 valid chain v7
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: fx/chain.json
+      - run: node -v   # expect v20.11.0
+
+      # 4 valid volta chain - PR - expect success, same version
+      - name: 4 valid chain PR
+        uses: v-gowridurgad/setup-node@fix-1628
+        with:
+          node-version-file: fx/chain.json
+      - run: node -v   # expect v20.11.0
+
+      # 5 volta.node - v7 - expect success
+      - name: 5 volta.node v7
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: fx/volta.json
+      - run: node -v   # expect v18.20.4
+
+      # 5 volta.node - PR - expect success, same version
+      - name: 5 volta.node PR
+        uses: v-gowridurgad/setup-node@fix-1628
+        with:
+          node-version-file: fx/volta.json
+      - run: node -v   # expect v18.20.4
+
+      # 6 engines.node - v7 - expect success
+      - name: 6 engines.node v7
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: fx/engines.json
+      - run: node -v   # expect v20.11.0
+
+      # 6 engines.node - PR - expect success, same version
+      - name: 6 engines.node PR
+        uses: v-gowridurgad/setup-node@fix-1628
+        with:
+          node-version-file: fx/engines.json
+      - run: node -v   # expect v20.11.0
+
+      # 7 nvmrc - v7 - expect success
+      - name: 7 nvmrc v7
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: fx/.nvmrc
+      - run: node -v   # expect v20.11.0
+
+      # 7 nvmrc - PR - expect success, same version
+      - name: 7 nvmrc PR
+        uses: v-gowridurgad/setup-node@fix-1628
+        with:
+          node-version-file: fx/.nvmrc
+      - run: node -v   # expect v20.11.0
+
+      # 8 node-version file - v7 - expect success
+      - name: 8 node-version file v7
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: fx/.node-version
+      - run: node -v   # expect v18.20.4
+
+      # 8 node-version file - PR - expect success, same version
+      - name: 8 node-version file PR
+        uses: v-gowridurgad/setup-node@fix-1628
+        with:
+          node-version-file: fx/.node-version
+      - run: node -v   # expect v18.20.4
+
+      # 9 tool-versions - v7 - expect success
+      - name: 9 tool-versions v7
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: fx/.tool-versions
+      - run: node -v   # expect v20.11.0
+
+      # 9 tool-versions - PR - expect success, same version
+      - name: 9 tool-versions PR
+        uses: v-gowridurgad/setup-node@fix-1628
+        with:
+          node-version-file: fx/.tool-versions
+      - run: node -v   # expect v20.11.0
+
+      # 10 mise.toml - v7 - expect success
+      - name: 10 mise.toml v7
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: fx/mise.toml
+      - run: node -v   # expect v20.11.0
+
+      # 10 mise.toml - PR - expect success, same version
+      - name: 10 mise.toml PR
+        uses: v-gowridurgad/setup-node@fix-1628
+        with:
+          node-version-file: fx/mise.toml
+      - run: node -v   # expect v20.11.0
+
+      # 11 node-version 20 + cache - v7 - expect success, cache-hit false
+      - name: 11 node-version 20 v7
+        id: c11v7
+        uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: npm
+      - run: |
+          node -v                                      # expect v20.x.x
+          echo "${{ steps.c11v7.outputs.node-version }}"   # expect 20.x.x
+          echo "${{ steps.c11v7.outputs.cache-hit }}"      # expect false
+
+      # 11 node-version 20 + cache - PR - expect success, same result
+      - name: 11 node-version 20 PR
+        id: c11pr
+        uses: v-gowridurgad/setup-node@fix-1628
+        with:
+          node-version: '20'
+          cache: npm
+      - run: |
+          node -v                                      # expect v20.x.x
+          echo "${{ steps.c11pr.outputs.node-version }}"   # expect 20.x.x
+          echo "${{ steps.c11pr.outputs.cache-hit }}"      # expect true or false
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "1 self cycle      v7=${{ steps.c1v7.outcome }}  pr=${{ steps.c1pr.outcome }}   (both expect failure)"
+          echo "2 mutual cycle    v7=${{ steps.c2v7.outcome }}  pr=${{ steps.c2pr.outcome }}   (both expect failure)"
+          echo "3 dangling        v7=${{ steps.c3v7.outcome }}  pr=${{ steps.c3pr.outcome }}   (both expect failure)"
