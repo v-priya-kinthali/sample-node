@@ -160,19 +160,21 @@ jobs:
           node-version-file: fx/.tool-versions
       - run: node -v   # expect v20.11.0
 
-      # 10 mise.toml - v7 - expect success
+      # 10 mise.toml - v7 - expect fail: mise.toml is not a supported version file
       - name: 10 mise.toml v7
+        id: c10v7
+        continue-on-error: true
         uses: actions/setup-node@v7
         with:
           node-version-file: fx/mise.toml
-      - run: node -v   # expect v20.11.0
 
-      # 10 mise.toml - PR - expect success, same version
+      # 10 mise.toml - PR - expect fail: PR does not add mise.toml support
       - name: 10 mise.toml PR
+        id: c10pr
+        continue-on-error: true
         uses: v-gowridurgad/setup-node@fix-1628
         with:
           node-version-file: fx/mise.toml
-      - run: node -v   # expect v20.11.0
 
       # 11 node-version 20 + cache - v7 - expect success, cache-hit false
       - name: 11 node-version 20 v7
@@ -204,3 +206,4 @@ jobs:
           echo "1 self cycle      v7=${{ steps.c1v7.outcome }}  pr=${{ steps.c1pr.outcome }}   (both expect failure)"
           echo "2 mutual cycle    v7=${{ steps.c2v7.outcome }}  pr=${{ steps.c2pr.outcome }}   (both expect failure)"
           echo "3 dangling        v7=${{ steps.c3v7.outcome }}  pr=${{ steps.c3pr.outcome }}   (both expect failure)"
+          echo "10 mise.toml      v7=${{ steps.c10v7.outcome }} pr=${{ steps.c10pr.outcome }}  (both expect failure)"
