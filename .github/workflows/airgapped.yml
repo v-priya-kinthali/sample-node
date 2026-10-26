@@ -1,5 +1,8 @@
 name: Air-gap test - setup-node
 on:
+  push:
+    branches:
+      - test-686
   workflow_dispatch:
     inputs:
       runner: { description: 'Runner label', default: 'ubuntu-latest' }
@@ -8,7 +11,7 @@ on:
 jobs:
   test:
     name: ${{ matrix.name }}
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -29,7 +32,7 @@ jobs:
       BLOCK_HOSTS: nodejs.org github.com api.github.com raw.githubusercontent.com objects.githubusercontent.com release-assets.githubusercontent.com
     steps:
       - name: Preload (online)
-        if: ${{ inputs.simulate }}
+        if: ${{ github.event_name == 'push' || inputs.simulate }}
         uses: actions/setup-node@v7
         with: { node-version: '${{ matrix.preload }}', package-manager-cache: false }
 
@@ -44,7 +47,7 @@ jobs:
         run: echo "${{ steps.v.outputs.exact }}" > ${{ matrix.file }}
 
       - name: Block network
-        if: ${{ inputs.simulate }}
+        if: ${{ github.event_name == 'push' || inputs.simulate }}
         run: |
           for h in $BLOCK_HOSTS; do echo "0.0.0.0 $h" | sudo tee -a /etc/hosts; echo ":: $h" | sudo tee -a /etc/hosts; done
           if curl -sS --max-time 10 https://nodejs.org/dist/index.json >/dev/null; then echo "Block failed"; exit 1; fi
