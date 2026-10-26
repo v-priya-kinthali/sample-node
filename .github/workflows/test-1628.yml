@@ -1,9 +1,9 @@
 name: setup-node v7 vs PR 41
 
 on:
-  push:
-    branches:
-      - test-686
+  # push:
+  #   branches:
+  #     - test-686
   workflow_dispatch:
 
 jobs:

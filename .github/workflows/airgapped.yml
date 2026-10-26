@@ -1,0 +1,66 @@
+name: Air-gap test - setup-node
+on:
+  workflow_dispatch:
+    inputs:
+      runner: { description: 'Runner label', default: 'ubuntu-latest' }
+      simulate: { description: 'Preload + block hosts (false on a real air-gapped runner)', type: boolean, default: true }
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ inputs.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: exact,                preload: '22',         version: EXACT,       expected: success }
+          - { name: major,                preload: '22',         version: '22',        expected: success }
+          - { name: major.minor,          preload: '22',         version: MM,          expected: success }
+          - { name: wildcard,             preload: '22',         version: '22.x',      expected: success }
+          - { name: range,                preload: '22',         version: '>=22 <23',  expected: success }
+          - { name: lts-alias,            preload: '22',         version: 'lts/*',     expected: failure }
+          - { name: latest-alias,         preload: '22',         version: 'latest',    expected: failure }
+          - { name: current-alias,        preload: '22',         version: 'current',   expected: failure }
+          - { name: nvmrc-file,           preload: '22',         version: '', file: '.nvmrc', expected: success }
+          - { name: check-latest-true,    preload: '22',         version: '22', check-latest: true, expected: success }
+          - { name: nightly,              preload: '24-nightly', version: '24-nightly', expected: success }
+          - { name: nightly-check-latest, preload: '24-nightly', version: '24-nightly', check-latest: true, expected: failure }
+    env:
+      BLOCK_HOSTS: nodejs.org github.com api.github.com raw.githubusercontent.com objects.githubusercontent.com release-assets.githubusercontent.com
+    steps:
+      - name: Preload (online)
+        if: ${{ inputs.simulate }}
+        uses: actions/setup-node@v7
+        with: { node-version: '${{ matrix.preload }}', package-manager-cache: false }
+
+      - name: Capture installed version
+        id: v
+        run: |
+          v=$(node --version | sed 's/^v//')
+          echo "exact=$v" >> "$GITHUB_OUTPUT"; echo "mm=${v%.*}" >> "$GITHUB_OUTPUT"
+
+      - name: Write version file
+        if: ${{ matrix.file }}
+        run: echo "${{ steps.v.outputs.exact }}" > ${{ matrix.file }}
+
+      - name: Block network
+        if: ${{ inputs.simulate }}
+        run: |
+          for h in $BLOCK_HOSTS; do echo "0.0.0.0 $h" | sudo tee -a /etc/hosts; echo ":: $h" | sudo tee -a /etc/hosts; done
+          if curl -sS --max-time 10 https://nodejs.org/dist/index.json >/dev/null; then echo "Block failed"; exit 1; fi
+
+      - name: Test
+        id: test
+        continue-on-error: true
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.version == 'EXACT' && steps.v.outputs.exact || matrix.version == 'MM' && steps.v.outputs.mm || matrix.version }}
+          node-version-file: ${{ matrix.file }}
+          check-latest: ${{ matrix.check-latest || false }}
+          package-manager-cache: false
+
+      - name: Assert
+        if: always()
+        run: |
+          echo "Expected: ${{ matrix.expected }} | Actual: ${{ steps.test.outcome }}"
+          [ "${{ steps.test.outcome }}" = "${{ matrix.expected }}" ]
