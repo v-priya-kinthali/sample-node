@@ -1,0 +1,79 @@
+name: volta-extends main vs PR-44
+
+on:
+  push:
+    branches:
+      - test-686
+  workflow_dispatch:
+
+jobs:
+  compare:
+    name: "${{ matrix.ref }} / ${{ matrix.case }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: [main, voltas-final]          # main = before fix, voltas-final = PR #44
+        case:
+          - passwd        # absolute path escape  -> leaks /etc/passwd
+          - environ       # full-file leak        -> leaks /proc/self/environ (env vars!)
+          - symlink       # symlink escape        -> leaks /etc/hostname
+          - traversal     # ../../.. escape       -> leaks /etc/hostname
+          - cycle         # a -> b -> a           -> stack overflow
+          - missing       # extends a missing file-> raw JSON used as "version"
+          - inside-ok     # legit relative extend -> must still work
+          - plain-ok      # legit plain .nvmrc    -> must still work
+
+    env:
+      FAKE_SECRET: leakme-this-is-a-secret
+
+    steps:
+      # The action under test, checked out at the ref we want to compare.
+      - name: Checkout action @ ${{ matrix.ref }}
+        uses: actions/checkout@v7
+        with:
+          repository: v-gowridurgad/setup-node
+          ref: ${{ matrix.ref }}
+          path: action
+
+      - name: Build fixtures
+        run: |
+          mkdir -p fx/sub
+
+          # --- attack fixtures (what a fork PR author could commit) ---
+          echo '{"name":"poc","volta":{"extends":"/etc/passwd"}}'        > fx/passwd.json
+          echo '{"name":"poc","volta":{"extends":"/proc/self/environ"}}' > fx/environ.json
+          ln -s /etc/hostname fx/symlink.nvmrc
+          echo '{"name":"poc","volta":{"extends":"../../../../etc/hostname"}}' > fx/traversal.json
+
+          # --- broken-config fixtures ---
+          echo '{"volta":{"extends":"./cycle-b.json"}}' > fx/cycle.json
+          echo '{"volta":{"extends":"./cycle.json"}}'   > fx/cycle-b.json
+          echo '{"volta":{"extends":"./does-not-exist.json"}}' > fx/missing.json
+
+          # --- legitimate fixtures that MUST keep working ---
+          echo 'v20.11.0' > fx/.nvmrc
+          echo '{"volta":{"extends":"../.nvmrc"}}' > fx/sub/inside-ok.json
+          echo 'v22.1.0' > fx/plain-ok.nvmrc
+
+          case "${{ matrix.case }}" in
+            symlink)   echo "FILE=fx/symlink.nvmrc"    >> "$GITHUB_ENV" ;;
+            inside-ok) echo "FILE=fx/sub/inside-ok.json" >> "$GITHUB_ENV" ;;
+            plain-ok)  echo "FILE=fx/plain-ok.nvmrc"   >> "$GITHUB_ENV" ;;
+            *)         echo "FILE=fx/${{ matrix.case }}.json" >> "$GITHUB_ENV" ;;
+          esac
+
+      - name: Run setup-node
+        id: setup
+        continue-on-error: true          # main CRASHES on several cases; keep the job alive
+        uses: ./action
+        with:
+          node-version-file: ${{ env.FILE }}
+
+      - name: Result
+        run: |
+          echo "ref      : ${{ matrix.ref }}"
+          echo "case     : ${{ matrix.case }}"
+          echo "file     : $FILE"
+          echo "outcome  : ${{ steps.setup.outcome }}"
+          echo "node     : $(node -v 2>/dev/null || echo 'not installed')"

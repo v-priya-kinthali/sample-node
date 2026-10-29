@@ -1,8 +1,8 @@
 name: Air-gap test - setup-node
 on:
-  push:
-    branches:
-      - test-686
+  # push:
+  #   branches:
+  #     - test-686
   workflow_dispatch:
     inputs:
       runner: { description: 'Runner label', default: 'ubuntu-latest' }
