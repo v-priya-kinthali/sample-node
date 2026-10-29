@@ -1,0 +1,175 @@
+name: Test setup-node PR 1627
+
+# PR: https://github.com/actions/setup-node/pull/1627
+# Branch: BridgeAR/setup-node @ BridgeAR/2026-09-03-setup-node-manifest
+
+on:
+  push:
+    branches:
+      - test-686
+  workflow_dispatch:
+
+env:
+  ACTIONS_STEP_DEBUG: true # needed: the new fallback logs are core.debug()
+  PR_ACTION: BridgeAR/setup-node@BridgeAR/2026-09-03-setup-node-manifest
+
+jobs:
+  # 1. Happy path - manifest via GitHub API (token present)
+  basic:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22.x', '24.1.0', 'lts/*', 'lts/jod', 'latest', 'current']
+    steps:
+      - uses: BridgeAR/setup-node@BridgeAR/2026-09-03-setup-node-manifest
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node --version && npm --version
+
+  # 2. check-latest - this path changed the most (manifest is now cached/reused)
+  check-latest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22.x', 'lts/*']
+    steps:
+      - uses: BridgeAR/setup-node@BridgeAR/2026-09-03-setup-node-manifest
+        with:
+          node-version: ${{ matrix.node }}
+          check-latest: true
+      - run: node --version
+
+  # 3. THE CORE FIX: no token -> API 403/429 -> must fall back to raw.githubusercontent.com
+  #    Expect debug log: "GitHub API returned HTTP 403; trying raw manifest."
+  no-token:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', 'lts/*'] # lts/* REQUIRES a manifest -> proves raw fallback works
+    steps:
+      - uses: BridgeAR/setup-node@BridgeAR/2026-09-03-setup-node-manifest
+        with:
+          node-version: ${{ matrix.node }}
+          token: '' # empty token => unauthenticated API
+
+  # 4. Invalid token -> API fails -> raw fallback must still install
+  bad-token:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: BridgeAR/setup-node@BridgeAR/2026-09-03-setup-node-manifest
+        with:
+          node-version: 'lts/*'
+          token: 'ghp_invalidtokenforcingafallback000000000000'
+      - run: node --version
+
+  # 5. Both manifest sources blocked -> numeric spec must fall back to nodejs.org
+  no-manifest-at-all:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Block api.github.com and raw.githubusercontent.com
+        run: |
+          echo "127.0.0.1 api.github.com"            | sudo tee -a /etc/hosts
+          echo "127.0.0.1 raw.githubusercontent.com" | sudo tee -a /etc/hosts
+      - uses: BridgeAR/setup-node@BridgeAR/2026-09-03-setup-node-manifest
+        with:
+          node-version: '22.11.0' # not in tool cache -> forces nodejs.org download
+      - run: node --version
+
+  # 6. Both manifest sources blocked + lts alias -> MUST fail with the new combined error
+  #    Expect: "Failed to fetch a valid manifest from the GitHub API and raw URL. API: ... Raw: ..."
+  lts-without-manifest-expect-failure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Block both manifest sources
+        run: |
+          echo "127.0.0.1 api.github.com"            | sudo tee -a /etc/hosts
+          echo "127.0.0.1 raw.githubusercontent.com" | sudo tee -a /etc/hosts
+      - id: setup
+        continue-on-error: true
+        uses: BridgeAR/setup-node@BridgeAR/2026-09-03-setup-node-manifest
+        with:
+          node-version: 'lts/*'
+      - name: Assert it failed
+        run: |
+          test "${{ steps.setup.outcome }}" = "failure" || exit 1
+
+  # 7. Only the API blocked -> raw fallback alone must satisfy lts + check-latest
+  raw-only:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "127.0.0.1 api.github.com" | sudo tee -a /etc/hosts
+      - uses: BridgeAR/setup-node@BridgeAR/2026-09-03-setup-node-manifest
+        with:
+          node-version: 'lts/jod'
+          check-latest: true
+      - run: node --version
+
+  # 8. Cross-platform / arch sanity (manifest + cache paths differ per OS)
+  os-matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest, macos-13]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: BridgeAR/setup-node@BridgeAR/2026-09-03-setup-node-manifest
+        with:
+          node-version: 'lts/*'
+      - run: node --version
+
+  # 9. Mirror input (mirror path must be unaffected by the manifest change)
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: BridgeAR/setup-node@BridgeAR/2026-09-03-setup-node-manifest
+        with:
+          node-version: '22.x'
+          mirror: 'https://nodejs.org/dist'
+      - run: node --version
+
+  # 10. Cache + checkout regression (ensure nothing else broke)
+  with-cache:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: actions/setup-node
+          ref: main
+      - uses: BridgeAR/setup-node@BridgeAR/2026-09-03-setup-node-manifest
+        with:
+          node-version: 'lts/*'
+          cache: npm
+      - run: npm ci
+
+  # 11. Rate-limit pressure: many cold lookups in parallel, no token.
+  #     This is the scenario the PR exists to fix.
+  rate-limit-pressure:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+    steps:
+      - uses: BridgeAR/setup-node@BridgeAR/2026-09-03-setup-node-manifest
+        with:
+          node-version: 'lts/*'
+          check-latest: true
+          token: ''
+      - run: node --version
+
+  # 12. Baseline comparison against released v6 (same inputs, expect same versions)
+  baseline-v6:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', 'lts/*', 'latest']
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node --version

@@ -1,9 +1,9 @@
 name: volta-extends main vs PR-44
 
 on:
-  push:
-    branches:
-      - test-686
+  # push:
+  #   branches:
+  #     - test-686
   workflow_dispatch:
 
 jobs:
